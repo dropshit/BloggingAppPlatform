@@ -9,7 +9,6 @@
             </div>
         }
 
-        <input type="hidden" asp-for="@Model.User.Id" name="Id" value="@Model.User.Id" />
         <div class="form-group">
             <input type="text" asp-for="@Model.User.Username" placeholder="Username" name="Username" class="form-control" />
             <span asp-validation-for="@Model.User.Username" class="text-danger"></span>

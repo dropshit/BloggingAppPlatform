@@ -1,46 +1,28 @@
-﻿using AutoMapper;
+using BloggingApp.Application.Users.Commands;
+using BloggingApp.Domain.Repositories;
 using BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
-using Business.Abstract;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers
+namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers;
+
+[Authorize(Policy = "AdminOrModerator")]
+[Area("Admin")]
+public class UsersController(IUserRepository userRepo, IMessageBus bus) : Controller
 {
-    [Authorize(Policy = "AdminOrModerator")]
-    [Area("Admin")]
-    public class UsersController : Controller
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        private readonly IMapper _mapper;
-        private readonly IUserService _userService;
-        public UsersController(IMapper mapper, IUserService userService)
-        {
-            _mapper = mapper;
-            _userService = userService;  
-        }
-        public IActionResult Index()
-        {
-            UserVM vm = new()
-            {
-                Users = _userService.GetAllUsers().Data,
-            };
-            return View(vm);
-        }
-        [HttpPost]
-        public IActionResult DeleteUser(int UserId)
-        {
-            var result = _userService.DeleteUser(UserId);
+        var users = await userRepo.GetAllWithRolesAsync(ct);
+        return View(new UserVM { Users = users });
+    }
 
-            if (result.Success)
-            {
-                TempData["Message"] = "User deleted successfully.";
-            }
-            else
-            {
-                TempData["Error"] = result.Message;
-            }
-
-            return RedirectToAction("Index");
-        }
-
+    [HttpPost]
+    public async Task<IActionResult> DeleteUser(int UserId, CancellationToken ct)
+    {
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(new DeleteUserCommand(UserId), ct);
+        TempData[result.IsError ? "Error" : "Message"] =
+            result.IsError ? result.FirstError.Description : "User deleted successfully.";
+        return RedirectToAction("Index");
     }
 }

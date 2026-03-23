@@ -55,15 +55,15 @@
                 {
                     <tr class="text-center">
                         <td>@index</td>
-                        <td>@post.Id</td>
+                        <td>@post.PostId</td>
                         <td>@post.UserId</td>
                         <td>@post.Title</td>
                         <td>@post.Context</td>
-                        <td>@post.CreateDate.ToString("dd/MM/yyyy")</td>
-                        <td>@post.UpdateTime?.ToString("dd/MM/yyyy")</td>
+                        <td>@post.Date</td>
+                        <td>@post.Date</td>
                         @{
                              <td>
-                                <form method="post" asp-action="DeletePost" asp-controller="Posts" asp-area="Admin" asp-route-PostId="@post.Id">
+                                <form method="post" asp-action="DeletePost" asp-controller="Posts" asp-area="Admin" asp-route-PostId="@post.PostId">
                                      <button type="submit" class="btn btn-danger w-100">Delete</button>
                                 </form>
                              </td>

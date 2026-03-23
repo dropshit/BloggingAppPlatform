@@ -1,109 +1,66 @@
-﻿using Business.Abstract;
-using Core.Helpers.Security.JWT;
-using Entities.DTOs;
+using BloggingApp.Application.Posts.Commands;
+using BloggingApp.Application.Posts.Queries;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.API.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Wolverine;
 
-namespace BloggingAppPlatform.API.Controllers
+namespace BloggingAppPlatform.API.Controllers;
+
+[Route("api/[controller]")]
+[ApiController]
+public class PostController(IMessageBus bus) : ApiController
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class PostController : ControllerBase
+    private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    private bool HasDeleteClaim() =>
+        User.IsInRole("Admin") || User.HasClaim(ClaimTypes.Role, "post.delete");
+
+    [Authorize]
+    [HttpPost("addPost")]
+    public async Task<IActionResult> AddPost(CreatePostBody body, CancellationToken ct)
     {
-        private readonly IPostService _postService;
-        public PostController(IPostService postService)
-        {
-            _postService = postService;
-        }
+        var command = new CreatePostCommand(GetUserId(), body.Title, body.Context);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<PostCreatedResponse>>(command, ct);
+        return result.Match(r => Ok(r), ErrorResult);
+    }
 
-        [HttpPost("addPost")]
-        public IActionResult AddPost(AddPostDto post)
-        {
-            var token = Request.Cookies["auth_token"];
+    [Authorize]
+    [HttpPut("updatePost")]
+    public async Task<IActionResult> UpdatePost(UpdatePostBody body, CancellationToken ct)
+    {
+        var command = new UpdatePostCommand(body.PostId, GetUserId(), body.Title, body.Context);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Updated>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
-            var userId = JwtHelper.GetUserIdFromToken(token);
-            post.UserId = userId.Value;
-            //post.CoverImageUrl = "bosdu";
-            _postService.Add(post);
-            if (post != null)
-            {
-                return Ok("Succesfully added");
-            }
-            else
-            {
-                return BadRequest("xeta bas verdi");
-            }
-        }
-        [HttpPost("updatePost")]
-        public IActionResult UpdatePost(UpdatePostDto post)
-        {
-            var token = Request.Cookies["auth_token"];
+    [Authorize]
+    [HttpDelete("deletePost")]
+    public async Task<IActionResult> DeletePost(int postId, CancellationToken ct)
+    {
+        var command = new DeletePostCommand(postId, GetUserId(), HasDeleteClaim());
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
-            var userId = JwtHelper.GetUserIdFromToken(token);
+    [HttpGet("getAllPosts")]
+    public async Task<IActionResult> GetAllPosts(CancellationToken ct, int page = 1, int pageSize = 10)
+    {
+        var query = new GetAllPostsQuery(page, pageSize);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<List<PostDetail>>>(query, ct);
+        return result.Match(r => Ok(r), ErrorResult);
+    }
 
-            if (!userId.HasValue)
-            {
-                return BadRequest("Invalid user ID.");
-            }
-
-            var result = _postService.Update(post, userId.Value); // Pass userId to the service
-
-            if (result.Success)
-            {
-                return Ok("Successfully updated");
-            }
-            else
-            {
-                return BadRequest(result.Message);
-            }
-        }
-        [HttpPost("deletePost")]
-        public IActionResult DeletePost(int postId)
-        {
-            // Get the JWT token from the auth_token cookie
-            var token = Request.Cookies["auth_token"];
-
-            // Get the userId from the token using the JwtTokenHandler
-            var userId = JwtHelper.GetUserIdFromToken(token);
-
-            if (userId.HasValue)
-            {
-                var result = _postService.Delete(postId, userId.Value);
-
-                if (result.Success)
-                {
-                    return Ok(result.Message);
-                }
-                else
-                {
-                    return BadRequest(result.Message);
-                }
-            }
-            else
-            {
-                // Enhanced error message for debugging
-                return BadRequest($"Invalid user ID. UserId: {userId}");
-            }
-        }
-
-
-        [HttpGet("getPostsByUserId")]
-        public IActionResult GetPostsByUserId(int userId)
-        {
-            var posts = _postService.GetPostsByUserId(userId);
-            if (posts.Success)
-                return Ok(posts.Data);
-            else
-                return BadRequest("Cannot found any posts or you don't have permission");
-        }
-
-        [HttpGet("getAllPosts")]
-        public IActionResult GetAllPosts()
-        {
-            var posts = _postService.GetAllPosts();
-            if (posts.Success)
-                return Ok(posts.Data);
-            else
-                return BadRequest(posts.Message);
-        }
+    [HttpGet("getPostsByUserId")]
+    public async Task<IActionResult> GetPostsByUserId(int userId, CancellationToken ct)
+    {
+        var query = new GetPostsByUserQuery(userId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<List<PostDetail>>>(query, ct);
+        return result.Match(r => Ok(r), ErrorResult);
     }
 }
+
+public record CreatePostBody(string Title, string Context);
+public record UpdatePostBody(int PostId, string Title, string Context);

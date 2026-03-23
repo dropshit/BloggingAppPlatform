@@ -1,54 +1,31 @@
-﻿using Business.Abstract;
-using Core.Helpers.Security.JWT;
+using System.Security.Claims;
+using BloggingApp.Application.Users.Commands;
 using Microsoft.AspNetCore.Mvc;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Controllers
+namespace BloggingAppPlatform.MVC.Controllers;
+
+public class FollowController(IMessageBus bus) : Controller
 {
-    public class FollowController : Controller
+    private int GetUserId() => int.Parse(User.FindFirstValue("userId")!);
+
+    [HttpPost]
+    public async Task<IActionResult> FollowUser(int followedUserId, CancellationToken ct)
     {
-        /* public IActionResult Index()
-         {
-             return View();
-         }*/
-        private readonly IUserService _userService;
-        public FollowController(IUserService userService)
-        {
-            _userService = userService;
-        }
-        [HttpPost]
-        public IActionResult FollowUser(int followedUserId)
-        {
-            var token = Request.Cookies["auth_token"];
-            var followerId = JwtHelper.GetUserIdFromToken(token!)!.Value;
-            var result = _userService.FollowUser(followerId, followedUserId);
-            if(result.Success)
-            {
-                ViewBag.SuccessMesage = result.Message;
-                //return RedirectToAction();
-                return RedirectToAction("Index", "Home");
-            }
-            else
-            {
-                ViewBag.ErrorMessage = result.Message;
-                return RedirectToAction("Index", "Home");
-            }
-        }
-        [HttpPost]
-        public IActionResult UnfollowUser(int unfollowedUserId)
-        {
-            var token = Request.Cookies["auth_token"];
-            var followerId = JwtHelper.GetUserIdFromToken(token).Value;
-            var result = _userService.UnfollowUser(followerId, unfollowedUserId);
-            if (result.Success)
-            {
-                ViewBag.SuccessMesage = result.Message;
-                return RedirectToAction("Index", "Home");
-            }
-            else
-            {
-                ViewBag.ErrorMessage = result.Message;
-                return RedirectToAction("Index", "Home");
-            }
-        }
+        var command = new FollowUserCommand(GetUserId(), followedUserId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        if (result.IsError)
+            TempData["Error"] = result.FirstError.Description;
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UnfollowUser(int unfollowedUserId, CancellationToken ct)
+    {
+        var command = new UnfollowUserCommand(GetUserId(), unfollowedUserId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        if (result.IsError)
+            TempData["Error"] = result.FirstError.Description;
+        return RedirectToAction("Index", "Home");
     }
 }

@@ -1,143 +1,99 @@
-﻿using BloggingAppPlatform.MVC.ViewModels;
-using Business.Abstract;
-using Core.Entities.Concrete;
-using Core.Helpers.Security.JWT;
-using Entities.Concrete;
-using Entities.DTOs;
+using System.Security.Claims;
+using BloggingApp.Application.Posts.Commands;
+using BloggingApp.Application.Users.Commands;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.MVC.Models;
+using BloggingAppPlatform.MVC.ViewModels;
 using Microsoft.AspNetCore.Mvc;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Controllers
+namespace BloggingAppPlatform.MVC.Controllers;
+
+public class ProfileController(
+    IPostRepository postRepo,
+    IUserRepository userRepo,
+    ICommentRepository commentRepo,
+    IUserFollowerRepository followerRepo,
+    IMessageBus bus) : Controller
 {
-    public class ProfileController : Controller
+    private int GetUserId() => int.Parse(User.FindFirstValue("userId")!);
+
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        private readonly IPostService _postService;
-        private readonly IUserService _userService; // Assuming you have a UserService to get user details
-        private readonly ICommentService _commentService;
+        int userId = GetUserId();
+        var user = await userRepo.GetByIdAsync(userId, ct);
+        var postsByUser = await postRepo.GetByUserIdWithDetailsAsync(userId, ct);
+        var comments = await commentRepo.GetByUserIdAsync(userId, ct);
+        int followerCount = await followerRepo.GetFollowerCountAsync(userId, ct);
 
-        public ProfileController(IPostService postService, IUserService userService, ICommentService commentService)
+        return View(new PostVM
         {
-            _postService = postService;
-            _userService = userService;
-            _commentService = commentService;
-        }
+            PostsByUser = postsByUser,
+            user = user,
+            Count = postsByUser.Count,
+            CommentCount = comments.Count,
+            FollowerCount = followerCount
+        });
+    }
 
-        public IActionResult Index()
+    [HttpGet]
+    public async Task<IActionResult> GetProfile(string userName, CancellationToken ct)
+    {
+        int currentUserId = GetUserId();
+        var user = await userRepo.GetByUsernameAsync(userName, ct);
+        if (user is null)
+            return RedirectToAction("Error", "Home");
+
+        var postsByUser = await postRepo.GetByUserIdWithDetailsAsync(user.Id, ct);
+        int followerCount = await followerRepo.GetFollowerCountAsync(user.Id, ct);
+        bool isFollow = await followerRepo.ExistsAsync(currentUserId, user.Id, ct);
+
+        return View("UserProfile", new PostVM
         {
-            var token = Request.Cookies["auth_token"];
-            int userId = JwtHelper.GetUserIdFromToken(token).Value;
+            PostsByUser = postsByUser,
+            user = user,
+            Count = postsByUser.Count,
+            IsFollow = isFollow,
+            FollowerCount = followerCount
+        });
+    }
 
-            GetUserDto user = _userService.GetUserById(userId);  
-            var postsByUser = _postService.GetPostsByUserId(userId).Data;
-            var postsCount = postsByUser.Count();
-            var commentCount = _commentService.GetCommentsByUserId(userId).Data.Count;  
-            PostVM vm = new()
-            {
-                PostsByUser = postsByUser,
-                user = user.User,
-                Count = postsCount,
-                CommentCount = commentCount,
-                FollowerCount= user.FollowerCount
-            };
-
-            return View(vm);
-        }
-        [HttpGet]
-        public IActionResult GetProfile(string userName)
+    [HttpPost]
+    public async Task<IActionResult> DeletePost(int postId, CancellationToken ct)
+    {
+        var command = new DeletePostCommand(postId, GetUserId(), false);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        if (result.IsError)
         {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken (token).Value;
-            try
-            {
-                
-                User user = _userService.GetByUsername(userName);
-                GetUserDto userDto = _userService.GetUserById(user.Id);
-                if (user == null)
-                {
-                    
-                    return RedirectToAction("Error", "Home", new { message = "User not found." });
-                }
-
-                
-                var postsByUser = _postService.GetPostsByUserId(user.Id).Data;
-                var postsCount = postsByUser.Count();
-                var isFollow = _userService.IsFollow(userId, user.Id).Data;
-                
-                PostVM vm = new()
-                {
-                    PostsByUser = postsByUser,
-                    user = user,
-                    Count = postsCount,
-                    IsFollow = isFollow,
-                    FollowerCount = userDto.FollowerCount
-                };
-
-                return View("UserProfile", vm);
-            }
-            catch (Exception ex)
-            {
-                return RedirectToAction("Error", "Home", new { message = ex.Message });
-            }
-        }
-
-        [HttpPost]
-        public IActionResult DeletePost(int postId)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token);
-
-            if (!userId.HasValue)
-            {
-                TempData["Error"] = "Invalid user ID.";
-                return RedirectToAction("NotFound", "Home");
-            }
-
-            var result = _postService.Delete(postId, userId.Value);
-
-            if (result.Success)
-            {
-                return RedirectToAction("Index", "Home");
-            }
-
-            TempData["Error"] = result.Message;
+            TempData["Error"] = result.FirstError.Description;
             return RedirectToAction("Error", "Home");
         }
-        [HttpGet]
-        public IActionResult UpdateProfileView(int userId, string username, string firstname, string lastname, string email)
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpGet]
+    public IActionResult UpdateProfileView(int userId, string username, string firstname, string lastname, string email)
+    {
+        return View("UpdateProfile", new UpdateUserVm
         {
-            UpdateUserDto updateUserDto = new()
+            User = new UpdateUserForm
             {
-                Id = userId,
                 Username = username,
                 Firstname = firstname,
                 Lastname = lastname,
                 Email = email
-            };
-            UpdateUserVm vm = new()
-            {
-                User = updateUserDto,
-            };
-            return View("UpdateProfile", vm);
-        }
-        [HttpPost]
-        public IActionResult UpdateProfile(UpdateUserDto updateUserDto)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token).Value;
-            updateUserDto.Id = userId;
-            if (ModelState.IsValid)
-            {
-                var result = _userService.UpdateUser(updateUserDto, userId);
-                if (result.Success)
-                {
-                    return RedirectToAction("Index", "Profile");
-                }
-                else
-                {
-                    // Return with an error message
-                    ModelState.AddModelError("", result.Message);
-                }
             }
-            return RedirectToAction("Index", "Profile");
-        }
+        });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UpdateProfile(UpdateUserForm form, CancellationToken ct)
+    {
+        int userId = GetUserId();
+        var command = new UpdateUserCommand(userId, userId, form.Username, form.Email, form.Firstname, form.Lastname);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Updated>>(command, ct);
+        if (result.IsError)
+            ModelState.AddModelError("", result.FirstError.Description);
+        return RedirectToAction("Index");
     }
 }

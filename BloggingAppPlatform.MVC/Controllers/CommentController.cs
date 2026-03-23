@@ -1,116 +1,61 @@
-﻿using BloggingAppPlatform.MVC.ViewModels;
-using Business.Abstract;
-using Core.Helpers.Security.JWT;
-using Entities.Concrete;
-using Entities.DTOs;
+using System.Security.Claims;
+using BloggingApp.Application.Comments.Commands;
+using BloggingAppPlatform.MVC.Models;
+using BloggingAppPlatform.MVC.ViewModels;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Hosting;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Controllers
+namespace BloggingAppPlatform.MVC.Controllers;
+
+public class CommentController(IMessageBus bus) : Controller
 {
-    public class CommentController : Controller
+    private int GetUserId() => int.Parse(User.FindFirstValue("userId")!);
+
+    public IActionResult Index() => View();
+
+    [HttpPost]
+    public async Task<IActionResult> AddComment(AddCommentForm form, CancellationToken ct)
     {
-        private readonly ICommentService _commentService;
+        var command = new AddCommentCommand(GetUserId(), form.PostId, form.CommentText);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        if (result.IsError)
+            ModelState.AddModelError("", result.FirstError.Description);
+        return RedirectToAction("Index", "Home");
+    }
 
-        public CommentController(ICommentService commentService)
+    [HttpPost]
+    public async Task<IActionResult> DeleteComment(int commentId, CancellationToken ct)
+    {
+        var command = new DeleteCommentCommand(commentId, GetUserId(), false);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        if (result.IsError)
         {
-            _commentService = commentService;
-        }
-
-        // Handle GET requests
-        public IActionResult Index()
-        {
-            return View();
-        }
-
-        // Handle POST request for adding a comment
-        [HttpPost]
-        public IActionResult AddComment(CommentDto comment)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token);
-            comment.UserId = userId.Value;
-            if (ModelState.IsValid)
-            {
-                var result = _commentService.Add(comment);
-                if (result.Success)
-                {
-                    // Redirect to the post page or handle the response
-                    return RedirectToAction("Index", "Home");
-                }
-                else
-                {
-                    // Return with an error message
-                    ModelState.AddModelError("", result.Message);
-                }
-            }
-
-            // If we got this far, something failed, return the same view with errors
-            return RedirectToAction("Index", "Home");
-        }
-        [HttpPost]
-        public IActionResult DeleteComment(int commentId)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token);
-
-            if (!userId.HasValue)
-            {
-                TempData["Error"] = "Invalid user ID.";
-                return RedirectToAction("NotFound", "Home");
-            }
-
-            var result = _commentService.Delete(commentId, userId.Value);
-
-            if (result.Success)
-            {
-                return RedirectToAction("Index", "Home");
-            }
-
-            TempData["Error"] = result.Message;
+            TempData["Error"] = result.FirstError.Description;
             return RedirectToAction("Error", "Home");
         }
-        [HttpPost]
-        public IActionResult UpdateComment(UpdateCommentDto uComment)
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UpdateComment(UpdateCommentForm form, CancellationToken ct)
+    {
+        var command = new UpdateCommentCommand(form.CommentId, GetUserId(), form.CommentText);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Updated>>(command, ct);
+        if (result.IsError)
         {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token);
-
-          
-            var result = _commentService.Update(uComment, userId.Value);
-
-            if (result.Success)
-            {
-                TempData["SuccessMessage"] = "Comment updated successfully!";
-                return RedirectToAction("Index", "Home");
-            }
-            else
-            {
-
-                ViewBag.ErrorMessage = result.Message;
-
-
-                UpdateCommentVM vm = new()
-                {
-                    CommentDto = uComment,
-                };
-                return View(vm);
-            }
+            ViewBag.ErrorMessage = result.FirstError.Description;
+            return View(new UpdateCommentVM { CommentDto = form });
         }
-        [HttpGet]
-        public IActionResult UpdateCommentView(int CommentId, string CommentText)
+        TempData["SuccessMessage"] = "Comment updated successfully!";
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpGet]
+    public IActionResult UpdateCommentView(int CommentId, string CommentText)
+    {
+        return View("UpdateComment", new UpdateCommentVM
         {
-            UpdateCommentDto updateComment = new()
-            {   
-                CommentId = CommentId,
-                CommentText = CommentText
-            };
-            UpdateCommentVM vm = new()
-            {
-                CommentDto = updateComment,
-            };
-            return View("UpdateComment",vm);
-
-        }
+            CommentDto = new UpdateCommentForm { CommentId = CommentId, CommentText = CommentText }
+        });
     }
 }

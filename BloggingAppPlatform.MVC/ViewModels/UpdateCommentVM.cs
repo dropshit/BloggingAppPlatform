@@ -1,9 +1,8 @@
-﻿using Entities.DTOs;
+using BloggingAppPlatform.MVC.Models;
 
-namespace BloggingAppPlatform.MVC.ViewModels
+namespace BloggingAppPlatform.MVC.ViewModels;
+
+public class UpdateCommentVM
 {
-    public class UpdateCommentVM
-    {
-       public UpdateCommentDto CommentDto { get; set; }
-    }
+    public UpdateCommentForm CommentDto { get; set; } = new();
 }

@@ -1,25 +1,30 @@
-﻿using Business.Abstract;
-using Entities.DTOs;
+using System.Security.Claims;
+using BloggingApp.Application.Reports.Commands;
+using BloggingAppPlatform.MVC.Models;
 using Microsoft.AspNetCore.Mvc;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Controllers
+namespace BloggingAppPlatform.MVC.Controllers;
+
+public class ReportController(IMessageBus bus) : Controller
 {
-    public class ReportController : Controller
-    {
-        private readonly IReportService _reportService;
-        public ReportController(IReportService reportService)
-        {
-            _reportService = reportService;
-        }
-        public IActionResult Index()
-        {
-            return View();
-        }
+    private string GetUsername() => User.FindFirstValue(System.Security.Claims.ClaimTypes.Name) ?? "";
 
-        public IActionResult Report(ReportDto report)
-        {
-            _reportService.AddReport(report);
-            return RedirectToAction("Index", "Home");
-        }
+    public IActionResult Index() => View();
+
+    [HttpPost]
+    public async Task<IActionResult> Report([FromForm] ReportForm form, CancellationToken ct)
+    {
+        var command = new AddReportCommand(GetUsername(), form.ReportedUser, form.Photo);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        if (result.IsError)
+            TempData["Error"] = result.FirstError.Description;
+        return RedirectToAction("Index", "Home");
     }
+}
+
+public class ReportForm
+{
+    public string ReportedUser { get; set; } = string.Empty;
+    public Microsoft.AspNetCore.Http.IFormFile Photo { get; set; } = null!;
 }

@@ -1,0 +1,25 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copy project files and restore (layer-cached)
+COPY BloggingApp.Domain/BloggingApp.Domain.csproj BloggingApp.Domain/
+COPY BloggingApp.Application/BloggingApp.Application.csproj BloggingApp.Application/
+COPY BloggingApp.Infrastructure/BloggingApp.Infrastructure.csproj BloggingApp.Infrastructure/
+COPY BloggingAppPlatform.MVC/BloggingAppPlatform.MVC.csproj BloggingAppPlatform.MVC/
+RUN dotnet restore BloggingAppPlatform.MVC/BloggingAppPlatform.MVC.csproj
+
+# Copy source and publish
+COPY BloggingApp.Domain/ BloggingApp.Domain/
+COPY BloggingApp.Application/ BloggingApp.Application/
+COPY BloggingApp.Infrastructure/ BloggingApp.Infrastructure/
+COPY BloggingAppPlatform.MVC/ BloggingAppPlatform.MVC/
+RUN dotnet publish BloggingAppPlatform.MVC/BloggingAppPlatform.MVC.csproj \
+    -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+# Uploaded images are stored here; mount a volume to persist across restarts
+VOLUME /app/wwwroot/images
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "BloggingAppPlatform.MVC.dll"]

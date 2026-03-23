@@ -1,135 +1,119 @@
-using Autofac;
-using Autofac.Extensions.DependencyInjection;
-using Business.Dependency.Autofac;
-using Core.DependencyResolve;
-using Core.Extensions;
-using Core.Helpers.IoC;
-using Core.Helpers.Security.Encryption;
-using Core.Helpers.Security.JWT;
-using Entities.Mappings;
+using BloggingApp.Application.Auth.Commands;
+using BloggingApp.Infrastructure;
+using BloggingApp.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using BloggingApp.Infrastructure.Auth;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using System.Reflection;
+using System.Text;
+using Wolverine;
+using Wolverine.FluentValidation;
 
-var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddHttpContextAccessor();
 
-builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
-builder.Host.ConfigureContainer<ContainerBuilder>(builder => builder.RegisterModule(new AutofacBusinessModule()));
+// Infrastructure (DbContext, repositories, JWT, hashing)
+builder.Services.AddInfrastructure(builder.Configuration);
 
-
-var tokenOptions = builder.Configuration.GetSection("TokenOptions").Get<TokenOptions>();
-
-builder.Services.AddAuthentication(x =>
+// Wolverine CQRS
+builder.Host.UseWolverine(opts =>
 {
-    x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddCookie().AddJwtBearer(option =>
-{
-    option.TokenValidationParameters = new TokenValidationParameters()
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = SecurityKeyHelper.CreateSecurityKey(tokenOptions.SecurityKey),
-        RequireExpirationTime = true,
-        ValidateAudience = true,
-        ValidateIssuer = true,
-        ValidAudience = tokenOptions.Audience,
-        ValidIssuer = tokenOptions.Issuer,
-    };
+    opts.Discovery.IncludeAssembly(typeof(RegisterHandler).Assembly);
+    opts.UseFluentValidation();
 });
-// Add services to the container.
 
+// JWT Auth
+var tokenOptions = builder.Configuration.GetSection("TokenOptions").Get<TokenOptions>()
+    ?? throw new InvalidOperationException("TokenOptions section missing from configuration.");
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(tokenOptions.SecurityKey)),
+            ValidateIssuer = true,
+            ValidIssuer = tokenOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = tokenOptions.Audience,
+            RequireExpirationTime = true
+        };
+    });
 
+builder.Services.AddAuthorization(opts =>
+{
+    opts.AddPolicy("CanDeletePost", p =>
+        p.RequireAssertion(ctx =>
+            ctx.User.IsInRole("Admin") || ctx.User.HasClaim(ClaimTypes.Role, "post.delete")));
+    opts.AddPolicy("CanDeleteComment", p =>
+        p.RequireAssertion(ctx =>
+            ctx.User.IsInRole("Admin") || ctx.User.HasClaim(ClaimTypes.Role, "comment.delete")));
+    opts.AddPolicy("CanDeleteReport", p =>
+        p.RequireRole("Admin", "Moderator"));
+    opts.AddPolicy("CanAddOpClaim", p =>
+        p.RequireAssertion(ctx =>
+            ctx.User.IsInRole("Admin") || ctx.User.HasClaim(ClaimTypes.Role, "add.opclaim")));
+});
+
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(swagger =>
 {
-    //This is to generate the Default UI of Swagger Documentation
     swagger.SwaggerDoc("v1", new OpenApiInfo
     {
         Version = "v1",
-        Title = "JWT Token Authentication API",
-        Description = ".NET 8 Web API"
+        Title = "BloggingApp API",
+        Description = ".NET 10 Clean Architecture"
     });
-    // To Enable authorization using Swagger (JWT)
-    swagger.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme()
+    swagger.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "JWT Authorization header using the Bearer scheme. \r\n\r\n Enter 'Bearer' [space] and then your token in the text input below.\r\n\r\nExample: \"Bearer 12345abcdef\"",
+        Description = "Enter 'Bearer {token}'"
     });
     swagger.AddSecurityRequirement(new OpenApiSecurityRequirement
-                {
-                    {
-                          new OpenApiSecurityScheme
-                            {
-                                Reference = new OpenApiReference
-                                {
-                                    Type = ReferenceType.SecurityScheme,
-                                    Id = "Bearer"
-                                }
-                            },
-                            new string[] {}
-
-                    }
-                });
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
+    });
 });
-
-//IoC Container => mapper, autofac
-
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(MyAllowSpecificOrigins,
-        policy =>
-        {
-            policy
-            .AllowAnyOrigin()
-             .AllowAnyHeader()
-            ;
-        });
-
+    options.AddPolicy("AllowAll", policy =>
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
-
-ServiceTool.Create(builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>());
-
-builder.Services.AddDependencyResolvers(
-            [
-
-                new CoreModule(),
-
-            ]);
-
-builder.Services.AddAutoMapper(cfg =>
-{
-    cfg.AddProfile<MappingProfile>(); // Adjust the namespace and profile name
-}, Assembly.GetExecutingAssembly(), typeof(MappingProfile).Assembly);
-
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline. 
+// Apply pending migrations at startup (safe for containerized deployments)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<BloggingAppDbContext>();
+    await db.Database.MigrateAsync();
+}
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-//app.ConfigureCustomExceptionMiddleware();
-app.UseCors(MyAllowSpecificOrigins);
 
+app.UseCors("AllowAll");
 app.UseHttpsRedirection();
 app.UseAuthentication();
-
 app.UseAuthorization();
-
-app.MapControllers().RequireCors(MyAllowSpecificOrigins);
+app.MapControllers();
 
 app.Run();

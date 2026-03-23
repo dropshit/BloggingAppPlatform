@@ -1,44 +1,29 @@
-﻿using BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
-using Business.Abstract;
+using BloggingApp.Application.Reports.Commands;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Wolverine;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers
+namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers;
+
+[Authorize(Policy = "AdminOrModerator")]
+[Area("Admin")]
+public class ReportsController(IReportRepository reportRepo, IMessageBus bus) : Controller
 {
-    [Authorize(Policy = "AdminOrModerator")]
-    [Area("Admin")]
-    public class ReportsController : Controller
+    [HttpGet]
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        private readonly IReportService _reportService;
-        public ReportsController(IReportService reportService)
-        {
-            _reportService = reportService;
-        }
-        [HttpGet]
-        public IActionResult Index()
-        {
-            ReportVM vm = new()
-            {
-                Reports = _reportService.GetAllReports().Data,
-            };
-            return View("Index", vm);
+        var reports = await reportRepo.GetAllAsync(ct);
+        return View(new ReportVM { Reports = reports });
+    }
 
-        }
-        [HttpPost]
-        public IActionResult DeleteReport(int Id)
-        {
-            var token = Request.Cookies["auth_token"];
-            var result =_reportService.DeleteReport(Id);
-            if (result.Success)
-            {
-                TempData["Message"] = "Post deleted successfully.";
-            }
-            else
-            {
-                TempData["Error"] = result.Message;
-            }
-
-            return RedirectToAction("Index", "Report", "Admin");
-        }
+    [HttpPost]
+    public async Task<IActionResult> DeleteReport(int Id, CancellationToken ct)
+    {
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(new DeleteReportCommand(Id), ct);
+        TempData[result.IsError ? "Error" : "Message"] =
+            result.IsError ? result.FirstError.Description : "Report deleted successfully.";
+        return RedirectToAction("Index");
     }
 }

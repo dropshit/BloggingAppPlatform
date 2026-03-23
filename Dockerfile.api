@@ -1,0 +1,23 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copy project files and restore (layer-cached)
+COPY BloggingApp.Domain/BloggingApp.Domain.csproj BloggingApp.Domain/
+COPY BloggingApp.Application/BloggingApp.Application.csproj BloggingApp.Application/
+COPY BloggingApp.Infrastructure/BloggingApp.Infrastructure.csproj BloggingApp.Infrastructure/
+COPY BloggingAppPlatform.API/BloggingAppPlatform.API.csproj BloggingAppPlatform.API/
+RUN dotnet restore BloggingAppPlatform.API/BloggingAppPlatform.API.csproj
+
+# Copy source and publish
+COPY BloggingApp.Domain/ BloggingApp.Domain/
+COPY BloggingApp.Application/ BloggingApp.Application/
+COPY BloggingApp.Infrastructure/ BloggingApp.Infrastructure/
+COPY BloggingAppPlatform.API/ BloggingAppPlatform.API/
+RUN dotnet publish BloggingAppPlatform.API/BloggingAppPlatform.API.csproj \
+    -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "BloggingAppPlatform.API.dll"]

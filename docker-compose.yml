@@ -1,0 +1,60 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: BloggingAppDb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d BloggingAppDb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=postgres;Database=BloggingAppDb;Username=postgres;Password=postgres"
+      TokenOptions__Audience: "Cabbar.com"
+      TokenOptions__Issuer: "Cabbar.com"
+      TokenOptions__AccessTokenExpiration: "60"
+      TokenOptions__SecurityKey: "BloggingAppPlatform2024BloggingAppPlatform2025BloggingAppPlatform2026BloggingAppPlatform2027BloggingAppPlatform2028BloggingAppPlatform"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mvc:
+    build:
+      context: .
+      dockerfile: Dockerfile.mvc
+    restart: unless-stopped
+    ports:
+      - "5001:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=postgres;Database=BloggingAppDb;Username=postgres;Password=postgres"
+      TokenOptions__Audience: "Cabbar.com"
+      TokenOptions__Issuer: "Cabbar.com"
+      TokenOptions__AccessTokenExpiration: "60"
+      TokenOptions__SecurityKey: "BloggingAppPlatform2024BloggingAppPlatform2025BloggingAppPlatform2026BloggingAppPlatform2027BloggingAppPlatform2028BloggingAppPlatform"
+    volumes:
+      - mvc_images:/app/wwwroot/images
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  mvc_images:

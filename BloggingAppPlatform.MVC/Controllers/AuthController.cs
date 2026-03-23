@@ -1,157 +1,121 @@
-﻿using Business.Abstract;
-using Entities.DTOs;
+using BloggingApp.Application.Auth.Commands;
+using BloggingApp.Application.Common.Interfaces;
+using BloggingApp.Domain.Entities;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.MVC.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
-namespace WebApp.Controllers
+namespace BloggingAppPlatform.MVC.Controllers;
+
+public class AuthController(
+    IUserRepository userRepo,
+    IHashingService hashing,
+    IJwtService jwt) : Controller
 {
-    public class AuthController : Controller
+    [HttpGet]
+    public IActionResult Register() => View();
+
+    [HttpPost]
+    public async Task<IActionResult> Register(RegisterForm form, CancellationToken ct)
     {
-        private readonly IAuthService _authService;
-        private readonly IUserService _userService;
+        if (!ModelState.IsValid)
+            return View(form);
 
-        public AuthController(IAuthService authService, IUserService userService)
+        if (form.Password != form.RePassword)
         {
-            _authService = authService;
-            _userService = userService;
-        }
-        [HttpGet]
-        public IActionResult Register()
-        {
-            return View();
+            ViewBag.ErrorMessage = "Passwords do not match.";
+            return View(form);
         }
 
-        [HttpPost]
-        public async Task<IActionResult> Register(RegisterDto registerDto)
+        if (await userRepo.GetByEmailAsync(form.Email, ct) is not null)
         {
-            if (!ModelState.IsValid)
-            {
-                ViewBag.ErrorMessage = "Please fill out all required fields correctly.";
-                return View(registerDto);
-            }
-
-            if (registerDto.Password != registerDto.RePassword)
-            {
-                ViewBag.ErrorMessage = "Passwords do not match.";
-                return View(registerDto);
-            }
-
-            // Check if email already exists
-            var userExistsByMail = _authService.UserExists(registerDto.Email);
-            // Check if username already exists
-            var userExistsByUsername = _authService.UserExistsByUsername(registerDto.Username);
-
-            // If either email or username exists, display an error message
-            if (!userExistsByMail.Success || !userExistsByUsername.Success)
-            {
-                ViewBag.ErrorMessage = "Email or Username is already used by another user.";
-                return View(registerDto);
-            }
-
-            // Register the user
-            var registerResult = _authService.Register(registerDto, registerDto.Password);
-            if (!registerResult.Success)
-            {
-                ViewBag.ErrorMessage = registerResult.Message;
-                return View(registerDto);
-            }
-
-            // Generate access token
-            var result = _authService.CreateAccessToken(registerResult.Data);
-            if (!result.Success)
-            {
-                ViewBag.ErrorMessage = result.Message;
-                return View(registerDto);
-            }
-
-            // Redirect to login page upon successful registration
-            TempData["SuccessMessage"] = "Registration successful! You can now log in.";
-            return RedirectToAction("Login");
+            ViewBag.ErrorMessage = "Email is already in use.";
+            return View(form);
         }
 
-
-        [HttpGet]
-        public IActionResult Login()
+        if (await userRepo.GetByUsernameAsync(form.Username, ct) is not null)
         {
-            return View();
-        }
-        [HttpPost]
-        public async Task<IActionResult> Login(LoginDto loginDTO)
-        {
-            if (!ModelState.IsValid)
-            {
-                ViewBag.ErrorMessage = "Please provide valid credentials.";
-                return View(loginDTO);
-            }
-
-            var userToLogin = _authService.Login(loginDTO);
-            if (!userToLogin.Success)
-            {
-                ViewBag.ErrorMessage = userToLogin.Message;
-                return View(loginDTO);
-            }
-
-            var result = _authService.CreateAccessToken(userToLogin.Data);
-            if (!result.Success)
-            {
-                ViewBag.ErrorMessage = result.Message;
-                return View(loginDTO);
-            }
-
-            var token = result.Data; 
-
-            var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-            var jwtToken = tokenHandler.ReadJwtToken(token.Token);
-
-            var expClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == "exp");
-            if (expClaim != null)
-            {
-                var expirationTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim.Value));
-
-                Response.Cookies.Append("auth_token", token.Token, new CookieOptions
-                {
-                    HttpOnly = true, 
-                    Secure = true, 
-                    SameSite = SameSiteMode.Strict, 
-                    Expires = expirationTime 
-                });
-            }
-
-            // Create claims
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, userToLogin.Data.Username),
-                new Claim(ClaimTypes.Email, userToLogin.Data.Email),
-                new Claim("userId", userToLogin.Data.Id.ToString()),
-            };
-
-            var roles = _userService.GetClaims(userToLogin.Data);
-            foreach (var role in roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role.Name));
-            }
-
-            // Create ClaimsIdentity and sign in
-            var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-            var authProperties = new AuthenticationProperties { IsPersistent = true };
-
-            // Sign in user
-            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity), authProperties);
-            return RedirectToAction("Index", "Home");
+            ViewBag.ErrorMessage = "Username is already in use.";
+            return View(form);
         }
 
-        [HttpPost]
-        public async Task<IActionResult> Logout()
-        {
-            // Log the user out
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        hashing.CreateHash(form.Password, out var hash, out var salt);
 
-            // Remove the auth_token cookie on logout
-            Response.Cookies.Delete("auth_token");
-            return RedirectToAction("Index", "Home");
+        var user = new User
+        {
+            FirstName = form.FirstName,
+            LastName = form.LastName,
+            Username = form.Username,
+            Email = form.Email,
+            PasswordHash = hash,
+            PasswordSalt = salt,
+            JoinDate = DateTime.UtcNow,
+            UpdateTime = DateTime.UtcNow,
+            Status = true
+        };
+
+        await userRepo.AddAsync(user, ct);
+
+        TempData["SuccessMessage"] = "Registration successful! You can now log in.";
+        return RedirectToAction("Login");
+    }
+
+    [HttpGet]
+    public IActionResult Login() => View();
+
+    [HttpPost]
+    public async Task<IActionResult> Login(LoginForm form, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            ViewBag.ErrorMessage = "Please provide valid credentials.";
+            return View(form);
         }
 
+        var user = await userRepo.GetByUsernameAsync(form.Username, ct);
+        if (user is null || !hashing.VerifyHash(form.Password, user.PasswordHash!, user.PasswordSalt!))
+        {
+            ViewBag.ErrorMessage = "Username or password is incorrect.";
+            return View(form);
+        }
+
+        var claims = await userRepo.GetClaimsAsync(user.Id, ct);
+        var token = jwt.CreateToken(user, claims);
+
+        Response.Cookies.Append("auth_token", token.Token, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Strict,
+            Expires = token.Expiration
+        });
+
+        var cookieClaims = new List<Claim>
+        {
+            new(ClaimTypes.Name, user.Username),
+            new(ClaimTypes.Email, user.Email),
+            new("userId", user.Id.ToString()),
+        };
+        foreach (var c in claims)
+            cookieClaims.Add(new(ClaimTypes.Role, c.Name));
+
+        var identity = new ClaimsIdentity(cookieClaims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(identity),
+            new AuthenticationProperties { IsPersistent = true });
+
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Logout()
+    {
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        Response.Cookies.Delete("auth_token");
+        return RedirectToAction("Index", "Home");
     }
 }

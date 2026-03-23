@@ -1,32 +1,28 @@
-﻿using BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
-using Business.Abstract;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers
+namespace BloggingAppPlatform.MVC.Areas.Admin.Controllers;
+
+[Authorize(Policy = "AdminOrModerator")]
+[Area("Admin")]
+public class HomeController(
+    IUserRepository userRepo,
+    IPostRepository postRepo,
+    ICommentRepository commentRepo) : Controller
 {
-    [Authorize(Policy = "AdminOrModerator")]
-    [Area("Admin")]
-    public class HomeController : Controller
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        private readonly IUserService _userService;
-        private readonly IPostService _postService;
-        private readonly ICommentService _commentService;
-        public HomeController(IUserService userService, IPostService postService, ICommentService commentService)
+        var users = await userRepo.GetAllWithRolesAsync(ct);
+        var posts = await postRepo.GetAllAsync(ct);
+        var comments = await commentRepo.GetAllAsync(ct);
+
+        return View(new HomeVM
         {
-            _userService = userService;
-            _postService = postService;
-            _commentService = commentService;
-        }
-        public IActionResult Index()
-        {
-            HomeVM vm = new()
-            {
-                UserCount = _userService.GetAllUsers().Data.Count,
-                PostCount = _postService.GetAllPosts().Data.Count,
-                CommentCount = _commentService.GetAllComments().Data.Count,
-            };
-            return View(vm);
-        }
+            UserCount = users.Count,
+            PostCount = posts.Count,
+            CommentCount = comments.Count
+        });
     }
 }

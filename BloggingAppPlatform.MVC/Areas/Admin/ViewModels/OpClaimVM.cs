@@ -1,11 +1,10 @@
-﻿using Core.Entities.Concrete;
-using Entities.DTOs;
+using BloggingApp.Domain.Entities;
+using BloggingAppPlatform.MVC.Models;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels
+namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
+
+public class OpClaimVM
 {
-    public class OpClaimVM
-    {
-        public OpClaimDto opClaim {  get; set; } 
-        public List<OperationClaim> OperationClaims { get; set; }
-    }
+    public OpClaimForm opClaim { get; set; } = new();
+    public List<OperationClaim> OperationClaims { get; set; } = [];
 }

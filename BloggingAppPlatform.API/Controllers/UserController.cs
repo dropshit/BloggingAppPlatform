@@ -1,57 +1,62 @@
-﻿using Business.Abstract;
-using Core.Helpers.Security.JWT;
-using Entities.DTOs;
+using BloggingApp.Application.Users.Commands;
+using BloggingApp.Application.Users.Queries;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.API.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Wolverine;
 
-namespace BloggingAppPlatform.API.Controllers
+namespace BloggingAppPlatform.API.Controllers;
+
+[Route("api/[controller]")]
+[ApiController]
+public class UserController(IMessageBus bus) : ApiController
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class UserController(IUserService userService) : ControllerBase
+    private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    [Authorize(Policy = "CanAddOpClaim")]
+    [HttpPost("addOperationClaim")]
+    public async Task<IActionResult> AddOperationClaim(AddOperationClaimCommand command, CancellationToken ct)
     {
-        private readonly IUserService _userService = userService;
-        [HttpPost("addOperationClaim")]
-        public IActionResult AddOperationClaimToUser(string username, string operationClaimName)
-        {
-            var result = _userService.AddOperationClaimToUser(username, operationClaimName);
-            if (result.Success)
-            {
-                return Ok(result.Message);
-            }
-            else
-            {
-                return BadRequest(result.Message);
-            }
-        }
-        [HttpPost("updateUser")]
-        public IActionResult UpdateUser(UpdateUserDto userDto)
-        {
-            var token = Request.Cookies["auth_token"];
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
-            var userId = JwtHelper.GetUserIdFromToken(token).Value;
-            var result = _userService.UpdateUser(userDto, userId);
-            if (result.Success)
-            {
-                return Ok(result.Message);
-            }
-            else 
-            { 
-                return BadRequest(result.Message); 
-            }
-        }
+    [Authorize]
+    [HttpPut("updateUser")]
+    public async Task<IActionResult> UpdateUser(UpdateUserBody body, CancellationToken ct)
+    {
+        var userId = GetUserId();
+        var command = new UpdateUserCommand(userId, userId, body.Username, body.Email, body.FirstName, body.LastName);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Updated>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
-        [HttpGet("GetUsers")]
-        public IActionResult GetAllUsers()
-        {
-            var result = _userService.GetAllUsers();
-            if (result.Success)
-            {
-                return Ok(result.Data);
-            }
-            else
-            {
-                return BadRequest(result.Message);
-            }
-        }
+    [HttpGet("getUsers")]
+    public async Task<IActionResult> GetAllUsers(CancellationToken ct)
+    {
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<List<UserDetail>>>(new GetAllUsersQuery(), ct);
+        return result.Match(r => Ok(r), ErrorResult);
+    }
+
+    [Authorize]
+    [HttpPost("follow")]
+    public async Task<IActionResult> Follow(int followedUserId, CancellationToken ct)
+    {
+        var command = new FollowUserCommand(GetUserId(), followedUserId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
+
+    [Authorize]
+    [HttpDelete("unfollow")]
+    public async Task<IActionResult> Unfollow(int followedUserId, CancellationToken ct)
+    {
+        var command = new UnfollowUserCommand(GetUserId(), followedUserId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
     }
 }
+
+public record UpdateUserBody(string Username, string Email, string FirstName, string LastName);

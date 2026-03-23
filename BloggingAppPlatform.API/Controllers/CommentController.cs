@@ -1,84 +1,67 @@
-﻿using Business.Abstract;
-using Core.Helpers.Security.JWT;
-using Entities.DTOs;
+using BloggingApp.Application.Comments.Commands;
+using BloggingApp.Application.Comments.Queries;
+using BloggingApp.Domain.Entities;
+using BloggingApp.Domain.Repositories;
+using BloggingAppPlatform.API.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Wolverine;
 
-namespace BloggingAppPlatform.API.Controllers
+namespace BloggingAppPlatform.API.Controllers;
+
+[Route("api/[controller]")]
+[ApiController]
+public class CommentController(IMessageBus bus) : ApiController
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class CommentController : ControllerBase
+    private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    private bool HasDeleteClaim() =>
+        User.IsInRole("Admin") || User.HasClaim(ClaimTypes.Role, "comment.delete");
+
+    [Authorize]
+    [HttpPost("addComment")]
+    public async Task<IActionResult> AddComment(AddCommentBody body, CancellationToken ct)
     {
-        private readonly ICommentService _commentService;
-        public CommentController(ICommentService commentService)
-        {
-            _commentService = commentService;
-        }
-        [HttpPost("addComment")]
-        public IActionResult AddComment(CommentDto comment)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token).Value;
-            comment.UserId = userId;
-            var addedComment = _commentService.Add(comment);
-            if (addedComment != null)
-            {
-                return Ok(addedComment.Message);
-            }
-            else
-            {
-                return BadRequest(addedComment.Message);
-            }
-        }
-        [HttpPost("deleteComment")]
-        public IActionResult DeleteComment(int Id)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token).Value;
-            var comment = _commentService.Delete(Id, userId);
-            if (comment != null)
-            {
-                return Ok(comment.Message);
-            }
-            else
-            {
-                return BadRequest(comment.Message);
-            }
-        }
-        [HttpPost("updateComment")]
-        public IActionResult UpdateComment(UpdateCommentDto commentDto)
-        {
-            var token = Request.Cookies["auth_token"];
-            var userId = JwtHelper.GetUserIdFromToken(token).Value;
-            var comment = _commentService.Update(commentDto, userId);
-            if (comment != null)
-            {
-                return Ok(comment.Message);
-            }
-            else
-            {
-                return BadRequest(comment.Message);
-            }
-        }
+        var command = new AddCommentCommand(GetUserId(), body.PostId, body.CommentText);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Success>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
-        [HttpGet("getCommentsByUserId")]
-        public IActionResult GetCommentsByUserId(int userId)
-        {
-            var comments = _commentService.GetCommentsByUserId(userId);
-            if (comments.Data.Count > 0)
-                return Ok(comments.Data);
-            else
-                return BadRequest(comments.Message);
-        }
-        [HttpGet("getCommentsByPostId")]
-        public IActionResult GetCommentsByPostId(int postId)
-        {
-            var comments = _commentService.GetCommentsByPostId(postId);
-            if (comments.Data.Count > 0)
-                return Ok(comments.Data);
-            else
-                return BadRequest(comments.Message);
-        }
+    [Authorize]
+    [HttpPut("updateComment")]
+    public async Task<IActionResult> UpdateComment(UpdateCommentBody body, CancellationToken ct)
+    {
+        var command = new UpdateCommentCommand(body.CommentId, GetUserId(), body.CommentText);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Updated>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
 
+    [Authorize]
+    [HttpDelete("deleteComment")]
+    public async Task<IActionResult> DeleteComment(int commentId, CancellationToken ct)
+    {
+        var command = new DeleteCommentCommand(commentId, GetUserId(), HasDeleteClaim());
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<ErrorOr.Deleted>>(command, ct);
+        return result.Match(_ => Ok(), ErrorResult);
+    }
+
+    [HttpGet("getCommentsByPostId")]
+    public async Task<IActionResult> GetCommentsByPostId(int postId, CancellationToken ct)
+    {
+        var query = new GetCommentsByPostQuery(postId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<List<CommentDetail>>>(query, ct);
+        return result.Match(r => Ok(r), ErrorResult);
+    }
+
+    [HttpGet("getCommentsByUserId")]
+    public async Task<IActionResult> GetCommentsByUserId(int userId, CancellationToken ct)
+    {
+        var query = new GetCommentsByUserQuery(userId);
+        var result = await bus.InvokeAsync<ErrorOr.ErrorOr<List<Comment>>>(query, ct);
+        return result.Match(r => Ok(r), ErrorResult);
     }
 }
+
+public record AddCommentBody(int PostId, string CommentText);
+public record UpdateCommentBody(int CommentId, string CommentText);

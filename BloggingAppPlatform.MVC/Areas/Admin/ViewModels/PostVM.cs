@@ -1,10 +1,8 @@
-﻿using Entities.Concrete;
-using Entities.DTOs;
+using BloggingApp.Domain.Repositories;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels
+namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
+
+public class PostVM
 {
-    public class PostVM
-    {
-        public List<Post> Posts { get; set; }
-    }
+    public List<PostDetail> Posts { get; set; } = [];
 }

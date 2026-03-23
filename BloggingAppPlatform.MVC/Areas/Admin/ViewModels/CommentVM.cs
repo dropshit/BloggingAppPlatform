@@ -1,9 +1,8 @@
-﻿using Entities.DTOs;
+using BloggingApp.Domain.Repositories;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels
+namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
+
+public class CommentVM
 {
-    public class CommentVM
-    {
-        public List<GetCommentDto> Comments { get; set; }
-    }
+    public List<CommentDetail> Comments { get; set; } = [];
 }

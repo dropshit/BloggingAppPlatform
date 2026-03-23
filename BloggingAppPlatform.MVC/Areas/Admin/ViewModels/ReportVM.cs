@@ -1,9 +1,8 @@
-﻿using Entities.Concrete;
+using BloggingApp.Domain.Entities;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels
+namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
+
+public class ReportVM
 {
-    public class ReportVM
-    {
-        public List<Report> Reports { get; set; }
-    }
+    public List<Report> Reports { get; set; } = [];
 }

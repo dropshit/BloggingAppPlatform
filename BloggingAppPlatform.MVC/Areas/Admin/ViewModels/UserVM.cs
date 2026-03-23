@@ -1,9 +1,8 @@
-﻿using Entities.DTOs;
+using BloggingApp.Domain.Repositories;
 
-namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels
+namespace BloggingAppPlatform.MVC.Areas.Admin.ViewModels;
+
+public class UserVM
 {
-    public class UserVM
-    {
-        public List<UserDto> Users { get; set; }
-    }
+    public List<UserDetail> Users { get; set; } = [];
 }
